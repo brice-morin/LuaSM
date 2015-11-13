@@ -1,5 +1,35 @@
+------Queue------
+Queue = {}
+ 
+function Queue.new()
+    return { first = 0, last = -1 }
+end
+ 
+function Queue.push( queue, value )
+    queue.last = queue.last + 1
+    queue[queue.last] = value
+end
+ 
+function Queue.pop( queue )
+    if queue.first > queue.last then
+        return nil
+    end
+ 
+    local val = queue[queue.first]
+    queue[queue.first] = nil
+    queue.first = queue.first + 1
+    return val
+end
+ 
+function Queue.empty( queue )
+    return queue.first > queue.last
+end
+----End Queue----
+
+
+
 ------Component------
-Component = {name = "component", behavior = nil, ports = {}}
+Component = {name = "component", behavior = nil, ports = {}, queue = Queue.new(), sched = nil}
 
 function Component:new (o)
     o = o or {}
@@ -8,14 +38,34 @@ function Component:new (o)
     return o
 end
 
+function Component:receive(port, event)
+    event.port = port
+    Queue.push(self.queue, event)
+    --if (coroutine.status(self.sched) == "suspended") then
+        coroutine.resume(self.sched)
+    --end
+end
+
 function Component:start()
+    self.sched = coroutine.create(function()
+        while true do
+            event = Queue.pop(self.queue)
+            if (not (event == nil)) then
+                self.behavior:handle(event)    
+            end
+            coroutine.yield()
+        end
+    end)
     self.behavior:onEntry()
+    coroutine.resume(self.sched)    
 end
 
 function Component:stop()
     self.behavior:onExit()
 end
 ----End Component----
+
+
 
 ------Atomic State------
 AtomicState = {name = "atomic state", outgoing = nil, nbOutgoing = 0}--fixme: do not pass array size
@@ -36,10 +86,8 @@ function AtomicState:onExit()
 end
 
 function AtomicState:handle(event)
-    print("debug " .. event.name)
     for i=1, self.nbOutgoing do
         if (self.outgoing[i].eventType.name == event.name and self.outgoing[i].eventType.port == event.port) then
-	    print("debug2 " .. event.name)
 	    return self.outgoing[i]:trigger(event), true
 	end
     end
@@ -255,6 +303,9 @@ R2 = Region:new{name = "R2", initial = C, current = C, states = {C, D}}
 
 CS = CompositeState:new{name = "C", regions = {R, R2}, nbRegion = 2}
 
+Comp = Component:new{name = "Cpt", behavior = CS, ports = {}, queue = Queue.new(), sched = nil}
+
+
 --Events
 e1 = E1:create({"a", true, 0})
 e2 = E1:create({"a", false, -1})
@@ -262,11 +313,11 @@ e3 = E2:create({})
 e4 = E3:create({3.14})
 e5 = E1:create({"a", false, -3})
 
-CS:onEntry()
---T.execute(e1)
-CS:handle(e1)
-CS:handle(e2)
-CS:handle(e3)
-CS:handle(e4)
-CS:handle(e5)
+--CS:onEntry()
+Comp:start()
+Comp:receive("p", e1)
+Comp:receive("p", e2)
+Comp:receive("p2", e3)
+Comp:receive("p", e4)
+Comp:receive("p", e5)
 ----End Test----
