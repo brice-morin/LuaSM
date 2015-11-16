@@ -110,7 +110,7 @@ end
 
 function AtomicState:handle(event)
     for i=1, #self.outgoing do
-        if (self.outgoing[i].eventType.name == event.name and self.outgoing[i].eventType.port == event.port) then
+        if (self.outgoing[i]:check(event)) then
 	    return self.outgoing[i]:trigger(event), true
 	end
     end
@@ -147,7 +147,6 @@ end
 
 function CompositeState:onEntry()
     self:executeOnEntry()
-    --AtomicState.onEntry()
     for i=1, #self.regions do
         self.regions[i]:onEntry()
     end
@@ -157,7 +156,6 @@ function CompositeState:onExit()
     for i=1, #self.regions do
         self.regions[i]:onExit()
     end
-    --AtomicState.onExit()
     self:executeOnExit()
 end
 
@@ -320,13 +318,15 @@ E3 = Event:new{name = "t2", port = "p"}
 
 T = Transition:new{name = "T", source = A, target = B, eventType = E1}:init()
 function T:execute(event) 
-    e6 = E1:create({"zzz", true, 42})
     if (event.params[2]) then
         print("execute T true " .. event.params[1] .. " " .. event.params[3]) 
     else
        	print("execute T false " .. event.params[1] .. " " .. event.params[3]) 
     end
+    e6 = E1:create({"zzz", true, 42})
+    e7 = E1:create({"www", false, -42})
     self.source.component:send("p", e6)
+    self.source.component:send("p", e7)
 end
 
 T3 = Transition:new{name = "T3", source = C, target = D, eventType = E2}:init()
@@ -374,7 +374,24 @@ function T5:execute(event)
         print("execute T5 true " .. event.params[1] .. " " .. event.params[3]) 
     else
        	print("execute T5 false " .. event.params[1] .. " " .. event.params[3]) 
+        error("the guard should have prevented that!!!!")
     end
+end
+function T5:check(event)
+    return Handler.check(self, event) and (event.params[2])
+end
+
+T6 = Transition:new{name = "T6", source = G, target = F, eventType = E1}:init()
+function T6:execute(event) 
+    if (event.params[2]) then
+        print("execute T6 true " .. event.params[1] .. " " .. event.params[3]) 
+    else
+       	print("execute T6 false " .. event.params[1] .. " " .. event.params[3]) 
+        error("the guard should have prevented that!!!!")
+    end
+end
+function T6:check(event)
+    return Handler.check(self, event) and (event.params[2])
 end
 R3 = Region:new{name = "R3", initial = F, states = {F, G}}
 CS2 = CompositeState:new{name = "CS2", regions = {R3}}
