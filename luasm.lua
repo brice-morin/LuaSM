@@ -29,7 +29,7 @@ end
 
 
 ------Component------
-Component = {name = "component", behavior = nil, queue = Queue.new(), sched = nil, connectors = {}}
+Component = {name = "component", on = false, behavior = nil, queue = Queue.new(), sched = nil, connectors = {}}
 
 function Component:new (o)
     o = o or {}
@@ -38,20 +38,10 @@ function Component:new (o)
     return o
 end
 
-function Component:subscribe(port, callback)
-    if (self.connectors == nil) then
-	self.connectors = {}
-    end
-    if (self.connectors[port] == nil) then
-        self.connectors[port] = {}
-    end
-    table.insert(self.connectors[port], callback)
-end
-
 function Component:receive(port, event)
     event.port = port
     Queue.push(self.queue, event)
-    if (coroutine.status(self.sched) == "suspended") then
+    if (self.on) then
         coroutine.resume(self.sched)
     end
 end
@@ -62,10 +52,16 @@ function Component:send(port, event)
     end      	
 end
 
-function Component:start()
+function Component:init()
     self.behavior:init(self)
+    self.on = false
+    self.queue = Queue.new()
+    return self
+end
+
+function Component:start()
     self.sched = coroutine.create(function()
-        while true do
+        while self.on do
             event = Queue.pop(self.queue)
             if (not (event == nil)) then
 		self.behavior:handle(event)    
@@ -76,10 +72,13 @@ function Component:start()
         end
     end)
     self.behavior:onEntry()
+    self.on = true
     coroutine.resume(self.sched)    
 end
 
-function Component:stop()
+function Component:stop()--Should we also empty/delete the queue?
+    self.on = false
+    self.sched = nil
     self.behavior:onExit()
 end
 ----End Component----
@@ -277,8 +276,10 @@ end
 
 ------Test------
 A = AtomicState:new{name = "A"}
-function A:onEntry()
-	print "A.onEntry"
+function A:onEntry() --ThingML attributes/functions can be accessed via self.component
+	print("A.onEntry " .. self.component.count)
+	self.component.count = self.component.count + 1
+        self.component:myFunction("hello", "world")
 end
 function A:onExit()
 	print "A.onExit"
@@ -286,7 +287,8 @@ end
 
 B = AtomicState:new{name = "B"}
 function B:onEntry()
-	print(B.name .. ".onEntry")
+	print(B.name .. ".onEntry " .. self.component.count)
+	self.component.count = self.component.count + 1
 end
 function B:onExit()
 	print(B.name .. ".onExit")
@@ -296,7 +298,8 @@ end
 
 C = AtomicState:new{name = "C"}
 function C:onEntry()
-	print "C.onEntry"
+	print("C.onEntry " .. self.component.count)
+	self.component.count = self.component.count + 1
 end
 function C:onExit()
 	print "C.onExit"
@@ -304,27 +307,28 @@ end
 
 D = AtomicState:new{name = "D"}
 function D:onEntry()
-	print(D.name .. ".onEntry")
+	print(D.name .. ".onEntry " .. self.component.count)
+	self.component.count = self.component.count + 1
 end
 function D:onExit()
 	print(D.name .. ".onExit")
 end
 
 --Event types
-E1 = Event:new{name = "t", port = "p"}
+E1 = Event:new{name = "t", port = "p"} --ThingML messages
 E2 = Event:new{name = "t", port = "p2"}
 E3 = Event:new{name = "t2", port = "p"}
 
 
 T = Transition:new{name = "T", source = A, target = B, eventType = E1}:init()
 function T:execute(event) 
-    if (event.params[2]) then
-        print("execute T true " .. event.params[1] .. " " .. event.params[3]) 
+    if (event.params.p2) then
+        print("execute T true " .. event.params.p1 .. " " .. event.params.p3) 
     else
-       	print("execute T false " .. event.params[1] .. " " .. event.params[3]) 
+       	print("execute T false " .. event.params.p1 .. " " .. event.params.p3) 
     end
-    e6 = E1:create({"zzz", true, 42})
-    e7 = E1:create({"www", false, -42})
+    e6 = E1:create({p1 = "zzz", p2 = true, p3 = 42})
+    e7 = E1:create({p1 = "www", p2 = false, p3 = -42})
     self.source.component:send("p", e6)
     self.source.component:send("p", e7)
 end
@@ -368,31 +372,33 @@ end
 function G:onExit()
 	print(G.name .. ".onExit")
 end
+
 T5 = Transition:new{name = "T5", source = F, target = G, eventType = E1}:init()
 function T5:execute(event) 
-    if (event.params[2]) then
-        print("execute T5 true " .. event.params[1] .. " " .. event.params[3]) 
+    if (event.params.p2) then
+        print("execute T5 true " .. event.params.p1 .. " " .. event.params.p3) 
     else
-       	print("execute T5 false " .. event.params[1] .. " " .. event.params[3]) 
+       	print("execute T5 false " .. event.params.p1 .. " " .. event.params.p3) 
         error("the guard should have prevented that!!!!")
     end
 end
 function T5:check(event)
-    return Handler.check(self, event) and (event.params[2])
+    return Handler.check(self, event) and (event.params.p2)
 end
 
 T6 = Transition:new{name = "T6", source = G, target = F, eventType = E1}:init()
 function T6:execute(event) 
-    if (event.params[2]) then
-        print("execute T6 true " .. event.params[1] .. " " .. event.params[3]) 
+    if (event.p2) then
+        print("execute T6 true " .. event.params.p1 .. " " .. event.params.p3) 
     else
-       	print("execute T6 false " .. event.params[1] .. " " .. event.params[3]) 
+       	print("execute T6 false " .. event.params.p1 .. " " .. event.params.p3) 
         error("the guard should have prevented that!!!!")
     end
 end
 function T6:check(event)
-    return Handler.check(self, event) and (event.params[2])
+    return Handler.check(self, event) and (event.params.p2)
 end
+
 R3 = Region:new{name = "R3", initial = F, states = {F, G}}
 CS2 = CompositeState:new{name = "CS2", regions = {R3}}
 function CS2:executeOnEntry()
@@ -403,20 +409,43 @@ function CS2:executeOnExit()
 end
 -------------
 
-Comp = Component:new{name = "Cpt", behavior = CS, ports = {}, queue = Queue.new(), sched = nil}
-Comp2 = Component:new{name = "Cpt2", behavior = CS2, ports = {}, queue = Queue.new(), sched = nil}
-Comp.connectors.p = {function(event) print("receive") Comp2:receive("p", event) end}
+Comp = Component:new{name = "Cpt", behavior = CS, count = 0}:init() --count is a ThingML attribute
+Comp2 = Component:new{name = "Cpt2", behavior = CS2}:init()
+Comp.connectors.p = {
+    function(event) Comp2:receive("p", event) end, --Can be used as ThingML connectors
+    function(event) print("receive " .. event.name) end -- or to register external listeners
+}
 
+function Comp:myFunction(a, b) -- ThingML function
+  print("myFunction(" .. a .. ", " .. b .. ")")
+end
 
 
 --Events
-e1 = E1:create({"a", true, 0})
-e2 = E1:create({"a", false, -1})
+e1 = E1:create({p1 = "a", p2 = true, p3 = 0})
+e2 = E1:create({p1 = "a", p2 = false, p3 = -1})
 e3 = E2:create({})
-e4 = E3:create({3.14})
-e5 = E1:create({"a", false, -3})
+e4 = E3:create({p = 3.14})
+e5 = E1:create({p1 = "a", p2 = false, p3 = -3})
 
 --CS:onEntry()
+print("========== 1 ==========")
+Comp:start()
+Comp2:start()
+print("e1")
+Comp:receive("p", e1)
+print("e2")
+Comp:receive("p", e2)
+print("e3")
+Comp:receive("p2", e3)
+print("e4")
+Comp:receive("p", e4)
+print("e5")
+Comp:receive("p", e5)
+Comp:stop()
+Comp2:stop()
+
+print("\n\n========== 2 ==========")
 Comp:start()
 Comp2:start()
 print("e1")
