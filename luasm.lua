@@ -29,7 +29,7 @@ end
 
 
 ------Component------
-Component = {name = "component", behavior = nil, ports = {}, queue = Queue.new(), sched = nil}
+Component = {name = "component", behavior = nil, queue = Queue.new(), sched = nil, connectors = {}}
 
 function Component:new (o)
     o = o or {}
@@ -38,22 +38,41 @@ function Component:new (o)
     return o
 end
 
+function Component:subscribe(port, callback)
+    if (self.connectors == nil) then
+	self.connectors = {}
+    end
+    if (self.connectors[port] == nil) then
+        self.connectors[port] = {}
+    end
+    table.insert(self.connectors[port], callback)
+end
+
 function Component:receive(port, event)
     event.port = port
     Queue.push(self.queue, event)
-    --if (coroutine.status(self.sched) == "suspended") then
+    if (coroutine.status(self.sched) == "suspended") then
         coroutine.resume(self.sched)
-    --end
+    end
+end
+
+function Component:send(port, event)
+    for i = 1, #self.connectors[port] do
+	self.connectors[port][i](event)
+    end      	
 end
 
 function Component:start()
+    self.behavior:init(self)
     self.sched = coroutine.create(function()
         while true do
             event = Queue.pop(self.queue)
             if (not (event == nil)) then
-                self.behavior:handle(event)    
+		self.behavior:handle(event)    
             end
-            coroutine.yield()
+            if (Queue.empty(self.queue)) then
+	        coroutine.yield()
+            end
         end
     end)
     self.behavior:onEntry()
@@ -68,13 +87,17 @@ end
 
 
 ------Atomic State------
-AtomicState = {name = "atomic state", outgoing = nil, nbOutgoing = 0}--fixme: do not pass array size
+AtomicState = {name = "atomic state", outgoing = nil, component = nil}
 
 function AtomicState:new (o)
     o = o or {}
     setmetatable(o, self)
     self.__index = self
     return o
+end
+
+function AtomicState:init(component)
+    self.component = component
 end
 
 function AtomicState:onEntry()
@@ -86,7 +109,7 @@ function AtomicState:onExit()
 end
 
 function AtomicState:handle(event)
-    for i=1, self.nbOutgoing do
+    for i=1, #self.outgoing do
         if (self.outgoing[i].eventType.name == event.name and self.outgoing[i].eventType.port == event.port) then
 	    return self.outgoing[i]:trigger(event), true
 	end
@@ -98,7 +121,7 @@ end
 
 
 ------Composite State------
-CompositeState = AtomicState:new{name = "composite state", regions = nil, nbRegion = 0}--fixme: do not pass array size
+CompositeState = AtomicState:new{name = "composite state", regions = nil}
 
 function CompositeState:new (o)
     o = o or {}
@@ -107,26 +130,44 @@ function CompositeState:new (o)
     return o
 end
 
+function CompositeState:init(component)
+    self.component = component
+    for i=1, #self.regions do
+        for j=1, #self.regions[i].states do
+            self.regions[i].states[j]:init(component)
+        end
+    end
+end
+
 function CompositeState:handle(event)
-    for i=1, self.nbRegion do
+    for i=1, #self.regions do
         self.regions[i]:handle(event)
     end
 end
 
 function CompositeState:onEntry()
-    --print(tostring(self.nbRegion))
-    --print(self.regions)
-    AtomicState.onEntry()
-    for i=1, self.nbRegion do
+    self:executeOnEntry()
+    --AtomicState.onEntry()
+    for i=1, #self.regions do
         self.regions[i]:onEntry()
     end
 end
 
 function CompositeState:onExit()
-    AtomicState.onExit()
-    for i=1, self.nbRegion do
+    for i=1, #self.regions do
         self.regions[i]:onExit()
     end
+    --AtomicState.onExit()
+    self:executeOnExit()
+end
+
+-- /!\ In case of composite do not redefine directly onEntry and on onExit, but rather those 2 methods /!\ --
+function CompositeState:executeOnEntry()
+    --by default, do nothing
+end
+
+function CompositeState:executeOnExit()
+    --by default, do nothing
 end
 ----End Composite State----
 
@@ -143,14 +184,14 @@ function Region:new (o)
 end
 
 function Region:onEntry()
-    if (not self.keepHistory) then
+    if (not(self.keepHistory) or self.current == nil) then
         self.current = self.initial
     end
-    self.current.onEntry()
+    self.current:onEntry()
 end
 
 function Region:onExit()
-    self.current.onExit()
+    self.current:onExit()
 end
 
 function Region:handle(event) 
@@ -163,7 +204,7 @@ end
 
 
 ------Event------
-Event = {name = "default", port = nil, nbParam = nil, params = nil}
+Event = {name = "default", port = nil, params = nil}
 
 function Event:new (o)
     o = o or {}
@@ -173,7 +214,7 @@ function Event:new (o)
 end
 
 function Event:create(params)
-    return Event:new{name = self.name, port = self.port, nbParam = self.nbParam, params = params}
+    return Event:new{name = self.name, port = self.port, params = params}
 end
 ----End Event----
 
@@ -195,7 +236,6 @@ function Handler:init()
     else
         table.insert(self.source.outgoing, self)
     end
-    self.source.nbOutgoing = self.source.nbOutgoing + 1
     return self
 end
 
@@ -204,7 +244,8 @@ function Handler:check(event)
 end
 
 function Handler:trigger(event)
-    --by default, do nothing
+    self:execute(event)
+    return self.source
 end
 
 function Handler:execute(event)
@@ -225,7 +266,6 @@ function Transition:new (o)
 end
 
 function Transition:trigger(event)
-    print("debug3 " .. event.name)
     self.source:onExit()
     self:execute(event)
     self.target:onEntry()
@@ -239,71 +279,117 @@ end
 
 ------Test------
 A = AtomicState:new{name = "A"}
-A.onEntry = function()
+function A:onEntry()
 	print "A.onEntry"
 end
-A.onExit = function()
+function A:onExit()
 	print "A.onExit"
 end
 
 B = AtomicState:new{name = "B"}
-B.onEntry = function()
+function B:onEntry()
 	print(B.name .. ".onEntry")
 end
-B.onExit = function()
+function B:onExit()
 	print(B.name .. ".onExit")
 end
 
 
 
 C = AtomicState:new{name = "C"}
-C.onEntry = function()
+function C:onEntry()
 	print "C.onEntry"
 end
-C.onExit = function()
+function C:onExit()
 	print "C.onExit"
 end
 
 D = AtomicState:new{name = "D"}
-D.onEntry = function()
+function D:onEntry()
 	print(D.name .. ".onEntry")
 end
-D.onExit = function()
+function D:onExit()
 	print(D.name .. ".onExit")
 end
 
 --Event types
-E1 = Event:new{name = "t", port = "p", nbParam = 3}
-E2 = Event:new{name = "t", port = "p2", nbParam = 0}
-E3 = Event:new{name = "t2", port = "p", nbParam = 1}
+E1 = Event:new{name = "t", port = "p"}
+E2 = Event:new{name = "t", port = "p2"}
+E3 = Event:new{name = "t2", port = "p"}
 
 
 T = Transition:new{name = "T", source = A, target = B, eventType = E1}:init()
 function T:execute(event) 
+    e6 = E1:create({"zzz", true, 42})
     if (event.params[2]) then
         print("execute T true " .. event.params[1] .. " " .. event.params[3]) 
     else
        	print("execute T false " .. event.params[1] .. " " .. event.params[3]) 
     end
+    self.source.component:send("p", e6)
 end
 
 T3 = Transition:new{name = "T3", source = C, target = D, eventType = E2}:init()
-function T3.execute(event) print "execute T3" end
+function T3:execute(event) print "execute T3" end
 
 T2 = Transition:new{name = "T2", source = B, target = A, eventType = E1}:init()
-function T2.execute(event) print "execute T2" end
+function T2:execute(event) print "execute T2" end
 
 T4 = Transition:new{name = "T4", source = D, target = C, eventType = E3}:init()
-function T4.execute(event) print "execute T4" end
+function T4:execute(event) print "execute T4" end
 
 
-R = Region:new{name = "R", initial = A, current = A, states = {A, B}}
+R = Region:new{name = "R", initial = A, states = {A, B}}
 
-R2 = Region:new{name = "R2", initial = C, current = C, states = {C, D}}
+R2 = Region:new{name = "R2", initial = C, states = {C, D}}
 
-CS = CompositeState:new{name = "C", regions = {R, R2}, nbRegion = 2}
+CS = CompositeState:new{name = "CS", regions = {R, R2}}
+function CS:executeOnEntry()
+	print "CS.onEntry"
+end
+function CS:executeOnExit()
+	print "CS.onExit"
+end
+
+
+----------
+F = AtomicState:new{name = "F"}
+function F:onEntry()
+	print "F.onEntry"
+end
+function F:onExit()
+	print "F.onExit"
+end
+
+G = AtomicState:new{name = "G"}
+function G:onEntry()
+	print(G.name .. ".onEntry")
+end
+function G:onExit()
+	print(G.name .. ".onExit")
+end
+T5 = Transition:new{name = "T5", source = F, target = G, eventType = E1}:init()
+function T5:execute(event) 
+    if (event.params[2]) then
+        print("execute T5 true " .. event.params[1] .. " " .. event.params[3]) 
+    else
+       	print("execute T5 false " .. event.params[1] .. " " .. event.params[3]) 
+    end
+end
+R3 = Region:new{name = "R3", initial = F, states = {F, G}}
+CS2 = CompositeState:new{name = "CS2", regions = {R3}}
+function CS2:executeOnEntry()
+	print "CS2.onEntry"
+end
+function CS2:executeOnExit()
+	print "CS2.onExit"
+end
+-------------
 
 Comp = Component:new{name = "Cpt", behavior = CS, ports = {}, queue = Queue.new(), sched = nil}
+Comp2 = Component:new{name = "Cpt2", behavior = CS2, ports = {}, queue = Queue.new(), sched = nil}
+Comp.connectors.p = {function(event) print("receive") Comp2:receive("p", event) end}
+
 
 
 --Events
@@ -315,9 +401,17 @@ e5 = E1:create({"a", false, -3})
 
 --CS:onEntry()
 Comp:start()
+Comp2:start()
+print("e1")
 Comp:receive("p", e1)
+print("e2")
 Comp:receive("p", e2)
+print("e3")
 Comp:receive("p2", e3)
+print("e4")
 Comp:receive("p", e4)
+print("e5")
 Comp:receive("p", e5)
+Comp:stop()
+Comp2:stop()
 ----End Test----
