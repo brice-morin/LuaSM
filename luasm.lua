@@ -62,11 +62,10 @@ end
 function Component:start()
     self.sched = coroutine.create(function()
         while self.on do
-            event = Queue.pop(self.queue)
-            if (not (event == nil)) then
-		self.behavior:handle(event)    
-            end
-            if (Queue.empty(self.queue)) then
+	    if (not Queue.empty(self.queue)) then
+                local event = Queue.pop(self.queue)
+          	self.behavior:handle(event)    
+            else            
 	        coroutine.yield()
             end
         end
@@ -231,7 +230,7 @@ function Handler:init()
     if (self.source.outgoing == nil) then
         self.source.outgoing = {self}
     else
-        table.insert(self.source.outgoing, self)
+        self.source.outgoing[#self.source.outgoing + 1] = self
     end
     return self
 end
@@ -429,7 +428,8 @@ e4 = E3:create({p = 3.14})
 e5 = E1:create({p1 = "a", p2 = false, p3 = -3})
 
 --CS:onEntry()
-print("========== 1 ==========")
+for i = 1, 5000 do
+print("========== " .. i .. " ==========")
 Comp:start()
 Comp2:start()
 print("e1")
@@ -444,20 +444,5 @@ print("e5")
 Comp:receive("p", e5)
 Comp:stop()
 Comp2:stop()
-
-print("\n\n========== 2 ==========")
-Comp:start()
-Comp2:start()
-print("e1")
-Comp:receive("p", e1)
-print("e2")
-Comp:receive("p", e2)
-print("e3")
-Comp:receive("p2", e3)
-print("e4")
-Comp:receive("p", e4)
-print("e5")
-Comp:receive("p", e5)
-Comp:stop()
-Comp2:stop()
+end
 ----End Test----
