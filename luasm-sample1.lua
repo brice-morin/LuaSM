@@ -162,19 +162,15 @@ local e3 = E2:create({})
 local e4 = E3:create({p = 3.14})
 local e5 = E1:create({p1 = "a", p2 = false, p3 = -3})
 
+collectgarbage("collect")
 print("After init " .. collectgarbage("count"));
 
-print("start")
 Comp:start()
 Comp2:start()
 
-print("After start " .. collectgarbage("count"));
-
-
-
 local bench = coroutine.create(function()
-	for i = 1, 100 do
-		print(i .. " : " .. collectgarbage("count"));
+	for i = 1, 10000 do
+		--print(i .. " : " .. collectgarbage("count"));
 		print("========== " .. i .. " ==========")
 		print("e1")
 		Comp:receive("p", e1)
@@ -193,15 +189,8 @@ while coroutine.status(bench) ~= 'dead' do
 	coroutine.resume(bench)
 end
 
---collectgarbage("collect")
-print("Before stop " .. collectgarbage("count"));
-
 Comp:stop()
 Comp2:stop()
-
---collectgarbage("collect")
-print("Before kill " .. collectgarbage("count"));
-
 Comp:kill()
 Comp2:kill()
 

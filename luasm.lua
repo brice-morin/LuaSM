@@ -1,4 +1,8 @@
 module("luasm", package.seeall)
+
+local co = coroutine
+local create, resume, yield = co.create, co.resume, co.yield
+
 ------Component------
 Component = {name = "component", on = false, behavior = nil, sched = nil, connectors = {}}
 
@@ -11,25 +15,27 @@ end
 
 function Component:receive(port, event)
 	event.port = port
-	coroutine.resume(self.sched, event)
+	resume(self.sched, event)
 end
 
 function Component:send(port, event)
-	local connectors = self.connectors[port]
-	for i = 1, #connectors do
-		connectors[i](event)
+	for i, connector in ipairs(self.connectors[port]) do
+		connector(event)
 	end      	
 end
 
 function Component:init()
 	self.behavior:init(self)
-	self.sched = coroutine.create(function(event)
+	self.sched = create(function(event)
 		while self.on do
-			local next, consumed = self.behavior:handle(event)  
+			local previous, consumed = self.behavior:handle(event)  
+			while (consumed) do --send empty event as long as they are consumed		
+				consumed = self.behavior:handle(NullEvent) 
+			end
 			--if (next.final) then
 				--return
 			--end
-			coroutine.yield()
+			yield()
 		end
 	end)
 	self.on = true
@@ -38,6 +44,7 @@ end
 
 function Component:start()
 	self.behavior:onEntry()  
+	resume(self.sched, NullEvent)
 end
 
 function Component:stop()
@@ -47,7 +54,7 @@ function Component:stop()
 end
 
 function Component:kill()
-	if (not self.on) then
+	if (self.on) then
 		self:stop()
 	end
 	self.behavior = nil
@@ -79,8 +86,7 @@ function AtomicState:onExit()
 end
 
 function AtomicState:handle(event)
-	for i=1, #self.outgoing do
-		local handler = self.outgoing[i]
+	for i, handler in ipairs(self.outgoing) do
 		if (handler:check(event)) then
 			return handler:trigger(event), true
 		end
@@ -102,30 +108,29 @@ end
 
 function CompositeState:init(component)
 	self.component = component
-	for i=1, #self.regions do
-		local region = self.regions[i]
-		for j=1, #region.states do
-			region.states[j]:init(component)
+	for i, region in ipairs(self.regions) do
+		for j, state in ipairs(region.states) do
+			state:init(component)
 		end
 	end
 end
 
 function CompositeState:handle(event)
-	for i=1, #self.regions do
-		self.regions[i]:handle(event)
+	for i, region in ipairs(self.regions) do
+		region:handle(event)
 	end
 end
 
 function CompositeState:onEntry()
 	self:executeOnEntry()
-	for i=1, #self.regions do
-		self.regions[i]:onEntry()
+	for i, region in ipairs(self.regions) do
+		region:onEntry()
 	end
 end
 
 function CompositeState:onExit()
-	for i=1, #self.regions do
-		self.regions[i]:onExit()
+	for i, region in ipairs(self.regions) do
+		region:onExit()
 	end
 	self:executeOnExit()
 end
@@ -182,6 +187,20 @@ end
 
 function Event:create(params)
 	return Event:new{name = self.name, port = self.port, params = params}
+end
+
+
+NullEvent = Event:new{name = "null", port = nil, params = nil}
+
+function NullEvent:new (o)
+	o = o or {}
+	setmetatable(o, self)
+	self.__index = self
+	return o
+end
+
+function NullEvent:create(params)
+	return NullEvent
 end
 ----End Event----
 
