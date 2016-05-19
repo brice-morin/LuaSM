@@ -1,10 +1,6 @@
 module("luasm", package.seeall)
-
-local co = coroutine
-local create, resume, yield = co.create, co.resume, co.yield
-
 ------Component------
-Component = {name = "component", on = false, behavior = nil, sched = nil, connectors = {}}
+Component = {name = "default", on = false, terminated = false, behavior = nil, sched = nil, connectors = {}}
 
 function Component:new (o)
 	o = o or {}
@@ -15,27 +11,25 @@ end
 
 function Component:receive(port, event)
 	event.port = port
-	resume(self.sched, event)
+	coroutine.resume(self.sched, event)
+	event = nil	
 end
 
 function Component:send(port, event)
-	for i, connector in ipairs(self.connectors[port]) do
-		connector(event)
+	for i, callback in pairs(self.connectors[port]) do
+		callback(event)
 	end      	
 end
 
 function Component:init()
 	self.behavior:init(self)
-	self.sched = create(function(event)
+	self.sched = coroutine.create(function(event) --returns true if terminated (reach a final state), false otherwise
 		while self.on do
-			local previous, consumed = self.behavior:handle(event)  
-			while (consumed) do --send empty event as long as they are consumed		
-				consumed = self.behavior:handle(NullEvent) 
+			local next, consumed = self.behavior:handle(event)  
+			while(consumed) do
+				next, consumed = self.behavior:handle(NullEvent)
 			end
-			--if (next.final) then
-				--return
-			--end
-			yield()
+			event = coroutine.yield()
 		end
 	end)
 	self.on = true
@@ -44,27 +38,30 @@ end
 
 function Component:start()
 	self.behavior:onEntry()  
-	resume(self.sched, NullEvent)
+	repeat
+		local next, consumed = self.behavior:handle(NullEvent)  
+	until(not consumed)
 end
 
 function Component:stop()
 	self.on = false
 	self.sched = nil
-	self.behavior:onExit()
+	if (self.behavior ~= nil) then self.behavior:onExit() end
 end
 
 function Component:kill()
-	if (self.on) then
-		self:stop()
-	end
+	print("killing " .. self.name)
+	if (self.on) then self:stop() end
 	self.behavior = nil
 	self.connectors = nil
+	self.terminated = true
+	self = nil
 end
 ----End Component----
 
 
 ------Atomic State------
-AtomicState = {name = "atomic state", outgoing = nil, component = nil, final = false}
+AtomicState = {name = "default", outgoing = nil, component = nil, region = nil, final = false}
 
 function AtomicState:new (o)
 	o = o or {}
@@ -73,31 +70,45 @@ function AtomicState:new (o)
 	return o
 end
 
-function AtomicState:init(component)
+function AtomicState:init(component, region)
 	self.component = component
+	self.region = region
 end
 
 function AtomicState:onEntry()
-	--by default, do nothing
+	self:executeOnEntry()
+	if self.final then self.component:kill() end
 end
 
 function AtomicState:onExit()
+	self:executeOnExit()
+	if self.final then
+		self.component:kill()
+		error("Ooops! That should not have happened... " .. self.name .. " is final and should have terminated component " .. component.name .. " on entry.")
+	end
+end
+
+function AtomicState:executeOnEntry()
+	--by default, do nothing
+end
+
+function AtomicState:executeOnExit()
 	--by default, do nothing
 end
 
 function AtomicState:handle(event)
-	for i, handler in ipairs(self.outgoing) do
+	for i, handler in ipairs(self.outgoing or {}) do
 		if (handler:check(event)) then
 			return handler:trigger(event), true
 		end
 	end
-	return self, false
+	return self, false, self.final
 end
 ----End Atomic State----
 
 
 ------Composite State------
-CompositeState = AtomicState:new{name = "composite state", regions = nil}
+CompositeState = AtomicState:new{name = "default", regions = nil}
 
 function CompositeState:new (o)
 	o = o or {}
@@ -106,19 +117,23 @@ function CompositeState:new (o)
 	return o
 end
 
-function CompositeState:init(component)
-	self.component = component
+function CompositeState:init(component, region)
+	AtomicState:init(self, component, region)
 	for i, region in ipairs(self.regions) do
-		for j, state in ipairs(region.states) do
-			state:init(component)
-		end
+		region:init(component)
 	end
 end
 
 function CompositeState:handle(event)
+	local isHandled = false
 	for i, region in ipairs(self.regions) do
-		region:handle(event)
+		local consumed, terminated = region:handle(event) 
+		if consumed then isHandled = true end
 	end
+	if not isHandled then --if nothing has consumed event, it is available to the composite
+		return AtomicState.handle(self, event)	
+	end
+	return self, isHandled
 end
 
 function CompositeState:onEntry()
@@ -135,7 +150,6 @@ function CompositeState:onExit()
 	self:executeOnExit()
 end
 
--- /!\ In case of composite do not redefine directly onEntry and on onExit, but rather those 2 methods /!\ --
 function CompositeState:executeOnEntry()
 	--by default, do nothing
 end
@@ -147,7 +161,7 @@ end
 
 
 ------Region------
-Region = {name = "region", initial = nil, keepHistory = false, current = initial, states = nil}--fixme: current = initial not working
+Region = {name = "default", initial = nil, keepHistory = false, current = initial, states = nil}--fixme: current = initial not working
 
 function Region:new (o)
 	o = o or {}
@@ -156,8 +170,16 @@ function Region:new (o)
 	return o
 end
 
+function Region:init(component)
+	self.current = self.initial
+	for i, state in ipairs(self.states) do
+		state:init(component, self)
+	end
+	return self
+end
+
 function Region:onEntry()
-	if (not(self.keepHistory) or self.current == nil) then
+	if (not self.keepHistory) then
 		self.current = self.initial
 	end
 	self.current:onEntry()
@@ -188,9 +210,11 @@ end
 function Event:create(params)
 	return Event:new{name = self.name, port = self.port, params = params}
 end
+----End Event----
 
 
-NullEvent = Event:new{name = "null", port = nil, params = nil}
+------NullEvent------
+NullEvent = Event:new{name = "NULL", port = "NULL", params = nil}
 
 function NullEvent:new (o)
 	o = o or {}
@@ -202,11 +226,11 @@ end
 function NullEvent:create(params)
 	return NullEvent
 end
-----End Event----
+----End NullEvent----
 
 
 ------Handler------
-Handler = {name = "handler", eventType = nil, source = nil}
+Handler = {name = "default", eventType = nil, source = nil}
 
 function Handler:new (o)
 	o = o or {}
@@ -216,16 +240,22 @@ function Handler:new (o)
 end
 
 function Handler:init()
-	if (self.source.outgoing == nil) then
-		self.source.outgoing = {self}
-	else
-		self.source.outgoing[#self.source.outgoing + 1] = self
+	if (self.source.final) then
+		error(self.source.name .. " is a final state and cannot have outgoing transision (" .. self.name .. ")")
 	end
+	if (self.source.outgoing == nil) then
+		self.source.outgoing = {}
+	end
+	table.insert(self.source.outgoing, self)
 	return self
 end
 
 function Handler:check(event)
-	return event.name == self.eventType.name and event.port == self.eventType.port
+	if (self.eventType == NullEvent) then
+		return event == NullEvent
+	else
+		return event.name == self.eventType.name and event.port == self.eventType.port
+	end
 end
 
 function Handler:trigger(event)
@@ -240,7 +270,7 @@ end
 
 
 ------Transition------
-Transition = Handler:new{name = "transition", target = nil}
+Transition = Handler:new{name = "default", target = nil}
 
 function Transition:new (o)
 	o = o or {}
@@ -252,6 +282,7 @@ end
 function Transition:trigger(event)
 	self.source:onExit()
 	self:execute(event)
+	self.source.region.current = self.target
 	self.target:onEntry()
 	return self.target
 end

@@ -4,39 +4,39 @@ require "luasm"
 print("Start " .. collectgarbage("count"));
 
 local A = luasm.AtomicState:new{name = "A"}
-function A:onEntry() --ThingML attributes/functions can be accessed via self.component
+function A:executeOnEntry() --ThingML attributes/functions can be accessed via self.component
 	print("A.onEntry " .. self.component.count)
 	self.component.count = self.component.count + 1
 	self.component:myFunction("hello", "world")
 end
-function A:onExit()
+function A:executeOnExit()
 	print "A.onExit"
 end
 
 local B = luasm.AtomicState:new{name = "B"}
-function B:onEntry()
+function B:executeOnEntry()
 	print(B.name .. ".onEntry " .. self.component.count)
 	self.component.count = self.component.count + 1
 end
-function B:onExit()
+function B:executeOnExit()
 	print(B.name .. ".onExit")
 end
 
 local C = luasm.AtomicState:new{name = "C"}
-function C:onEntry()
+function C:executeOnEntry()
 	print("C.onEntry " .. self.component.count)
 	self.component.count = self.component.count + 1
 end
-function C:onExit()
+function C:executeOnExit()
 	print "C.onExit"
 end
 
 local D = luasm.AtomicState:new{name = "D"}
-function D:onEntry()
+function D:executeOnEntry()
 	print(D.name .. ".onEntry " .. self.component.count)
 	self.component.count = self.component.count + 1
 end
-function D:onExit()
+function D:executeOnExit()
 	print(D.name .. ".onExit")
 end
 
@@ -56,9 +56,11 @@ function T:execute(event)
 	end
 	local e6 = E1:create({p1 = "zzz", p2 = true, p3 = 42})
 	local e7 = E1:create({p1 = "www", p2 = false, p3 = -42})
+	local e8 = E1:create({p1 = "zzz", p2 = true, p3 = 42})
 	print(component.name .. " sending...")
 	component:send("p", e6)
 	component:send("p", e7)
+	component:send("p", e8)
 end
 
 local T3 = luasm.Transition:new{name = "T3", source = C, target = D, eventType = E2}:init()
@@ -92,19 +94,16 @@ end
 
 ----------
 local F = luasm.AtomicState:new{name = "F"}
-function F:onEntry()
+function F:executeOnEntry()
 	print "F.onEntry"
 end
-function F:onExit()
+function F:executeOnExit()
 	print "F.onExit"
 end
 
-local G = luasm.AtomicState:new{name = "G"}
-function G:onEntry()
+local G = luasm.AtomicState:new{name = "G", final = true}
+function G:executeOnEntry()
 	print(G.name .. ".onEntry")
-end
-function G:onExit()
-	print(G.name .. ".onExit")
 end
 
 local T5 = luasm.Transition:new{name = "T5", source = F, target = G, eventType = E1}:init()
@@ -117,20 +116,7 @@ function T5:execute(event)
 	end
 end
 function T5:check(event)
-	return Handler.check(self, event) and (event.params.p2)
-end
-
-local T6 = luasm.Transition:new{name = "T6", source = G, target = F, eventType = E1}:init()
-function T6:execute(event) 
-	if (event.p2) then
-		print("execute T6 true " .. event.params.p1 .. " " .. event.params.p3) 
-	else
-		print("execute T6 false " .. event.params.p1 .. " " .. event.params.p3) 
-		error("the guard should have prevented that!!!!")
-	end
-end
-function T6:check(event)
-	return Handler.check(self, event) and (event.params.p2)
+	return luasm.Handler.check(self, event) and (event.params.p2)
 end
 
 local R3 = luasm.Region:new{name = "R3", initial = F, states = {F, G}}
@@ -145,9 +131,11 @@ end
 
 local Comp = luasm.Component:new{name = "Cpt", behavior = CS, count = 0}:init() --count is a ThingML attribute
 local Comp2 = luasm.Component:new{name = "Cpt2", behavior = CS2}:init()
-Comp.connectors.p = {
-	function(event) Comp2:receive("p", event) end, --Can be used as ThingML connectors
-	--function(event) print("receive " .. event.name) end -- or to register external listeners
+Comp.connectors = {
+	p = { 
+		Comp2 = function(event) if not Comp2.terminated then Comp2:receive("p", event) else Comp.connectors.p.Comp2 = nil end end, --Can be used as ThingML connectors
+		ext = function(event) print("receive " .. event.name) end -- or to register external listeners
+	}
 }
 
 function Comp:myFunction(a, b) -- ThingML function
@@ -162,15 +150,19 @@ local e3 = E2:create({})
 local e4 = E3:create({p = 3.14})
 local e5 = E1:create({p1 = "a", p2 = false, p3 = -3})
 
-collectgarbage("collect")
 print("After init " .. collectgarbage("count"));
 
+print("start")
 Comp:start()
 Comp2:start()
 
+print("After start " .. collectgarbage("count"));
+
+
+
 local bench = coroutine.create(function()
-	for i = 1, 10000 do
-		--print(i .. " : " .. collectgarbage("count"));
+	for i = 1, 10 do
+		print(i .. " : " .. collectgarbage("count"));
 		print("========== " .. i .. " ==========")
 		print("e1")
 		Comp:receive("p", e1)
@@ -189,10 +181,17 @@ while coroutine.status(bench) ~= 'dead' do
 	coroutine.resume(bench)
 end
 
+--collectgarbage("collect")
+print("Before stop " .. collectgarbage("count"));
+
 Comp:stop()
-Comp2:stop()
+--Comp2:stop()
+
+--collectgarbage("collect")
+print("Before kill " .. collectgarbage("count"));
+
 Comp:kill()
-Comp2:kill()
+--Comp2:kill()
 
 collectgarbage("collect")
 print("After kill " .. collectgarbage("count"));
