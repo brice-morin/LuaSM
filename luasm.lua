@@ -1,6 +1,6 @@
 module("luasm", package.seeall)
 ------Component------
-Component = {name = "default", on = false, terminated = false, behavior = nil, sched = nil, connectors = {}}
+Component = {name = "default", on = false, terminated = false, behavior = nil, sched = nil, connectors = {}, sessions = {}, root = nil}
 
 function Component:new (o)
 	o = o or {}
@@ -9,9 +9,41 @@ function Component:new (o)
 	return o
 end
 
+function Component:addSession(session)
+	session.root = self
+	session.connectors = self.connectors
+	session.sessions = {}
+	table.insert(self.sessions, session)
+	session:init():start()
+end
+
+function Component:removeSession(session)
+	if (session.root == self) then
+		local index = -1
+		for i, s in ipairs(self.sessions) do
+			if s == session then
+				index = i
+				break
+			end
+		end
+		if (index ~= -1) then
+			session:kill()
+			table.remove(sessions, index)
+			session = nil
+		else
+			error("Cannot find session " .. session.name .. " within component " .. self.name)
+		end
+	else
+		error("Cannot remove session " .. session.name .. " as it is not contained by component " .. self.name)
+	end
+end
+
 function Component:receive(port, event)
 	event.port = port
 	coroutine.resume(self.sched, event)
+	for i, session in ipairs(self.sessions) do
+		session:receive(port, event)
+	end
 	event = nil	
 end
 
@@ -44,6 +76,9 @@ function Component:start()
 end
 
 function Component:stop()
+	for i, session in ipairs(self.sessions) do
+		session:stop()
+	end
 	self.on = false
 	self.sched = nil
 	if (self.behavior ~= nil) then self.behavior:onExit() end
@@ -51,6 +86,9 @@ end
 
 function Component:kill()
 	print("killing " .. self.name)
+	for i, session in ipairs(self.sessions) do
+		session:kill()
+	end
 	if (self.on) then self:stop() end
 	self.behavior = nil
 	self.connectors = nil
