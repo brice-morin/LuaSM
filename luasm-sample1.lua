@@ -41,12 +41,12 @@ function D:executeOnExit()
 end
 
 --Event types
-local E1 = luasm.Event:new{name = "t", port = "p"} --ThingML messages
-local E2 = luasm.Event:new{name = "t", port = "p2"}
-local E3 = luasm.Event:new{name = "t2", port = "p"}
+local E1 = luasm.Event:new{name = "t"} --ThingML messages
+local E2 = luasm.Event:new{name = "t"}
+local E3 = luasm.Event:new{name = "t2"}
 
 
-local T = luasm.Transition:new{name = "T", source = A, target = B, eventType = E1}:init()
+local T = luasm.Transition:new{name = "T", source = A, target = B, eventType = E1, port = "p"}:init()
 function T:execute(event) 
 	local component = self.source.component
 	if (event.params.p2) then
@@ -63,17 +63,17 @@ function T:execute(event)
 	component:send("p", e8)
 end
 
-local T3 = luasm.Transition:new{name = "T3", source = C, target = D, eventType = E2}:init()
+local T3 = luasm.Transition:new{name = "T3", source = C, target = D, eventType = E2, port = "p2"}:init()
 function T3:execute(event) 
 	print "execute T3" 
 end
 
-local T2 = luasm.Transition:new{name = "T2", source = B, target = A, eventType = E1}:init()
+local T2 = luasm.Transition:new{name = "T2", source = B, target = A, eventType = E1, port = "p"}:init()
 function T2:execute(event) 
 	print "execute T2" 
 end
 
-local T4 = luasm.Transition:new{name = "T4", source = D, target = C, eventType = E3}:init()
+local T4 = luasm.Transition:new{name = "T4", source = D, target = C, eventType = E3, port = "p"}:init()
 function T4:execute(event) 
 	print "execute T4"
 end
@@ -106,7 +106,7 @@ function G:executeOnEntry()
 	print(G.name .. ".onEntry")
 end
 
-local T5 = luasm.Transition:new{name = "T5", source = F, target = G, eventType = E1}:init()
+local T5 = luasm.Transition:new{name = "T5", source = F, target = G, eventType = E1, port = "p"}:init()
 function T5:execute(event) 
 	if (event.params.p2) then
 		print("execute T5 true " .. event.params.p1 .. " " .. event.params.p3) 
@@ -115,8 +115,8 @@ function T5:execute(event)
 		error("the guard should have prevented that!!!!")
 	end
 end
-function T5:check(event)
-	return luasm.Handler.check(self, event) and (event.params.p2)
+function T5:doCheck(event)
+	return event.params.p2
 end
 
 local R3 = luasm.Region:new{name = "R3", initial = F, states = {F, G}}
@@ -131,6 +131,7 @@ end
 
 local Comp = luasm.Component:new{name = "Cpt", behavior = CS, count = 0}:init() --count is a ThingML attribute
 local Comp2 = luasm.Component:new{name = "Cpt2", behavior = CS2}:init()
+
 Comp.connectors = {
 	p = { 
 		Comp2 = function(event) if not Comp2.terminated then Comp2:receive("p", event) else Comp.connectors.p.Comp2 = nil end end, --Can be used as ThingML connectors
@@ -161,7 +162,7 @@ print("After start " .. collectgarbage("count"));
 
 
 local bench = coroutine.create(function()
-	for i = 1, 10 do
+	for i = 1, 2 do
 		print(i .. " : " .. collectgarbage("count"));
 		print("========== " .. i .. " ==========")
 		print("e1")

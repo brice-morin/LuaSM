@@ -48,9 +48,10 @@ function Component:receive(port, event)
 end
 
 function Component:send(port, event)
-	for i, callback in pairs(self.connectors[port]) do
+	local callbacks = self.connectors[port]
+	for i, callback in pairs(callbacks) do
 		callback(event)
-	end      	
+	end
 end
 
 function Component:init()
@@ -85,7 +86,6 @@ function Component:stop()
 end
 
 function Component:kill()
-	print("killing " .. self.name)
 	for i, session in ipairs(self.sessions) do
 		session:kill()
 	end
@@ -246,7 +246,7 @@ function Event:new (o)
 end
 
 function Event:create(params)
-	return Event:new{name = self.name, port = self.port, params = params}
+	return Event:new{name = self.name, params = params}
 end
 ----End Event----
 
@@ -268,7 +268,7 @@ end
 
 
 ------Handler------
-Handler = {name = "default", eventType = nil, source = nil}
+Handler = {name = "default", eventType = nil, port = nil, source = nil}
 
 function Handler:new (o)
 	o = o or {}
@@ -278,22 +278,28 @@ function Handler:new (o)
 end
 
 function Handler:init()
-	if (self.source.final) then
+	local source = self.source
+	if (source.final) then
 		error(self.source.name .. " is a final state and cannot have outgoing transision (" .. self.name .. ")")
 	end
-	if (self.source.outgoing == nil) then
-		self.source.outgoing = {}
+	if (source.outgoing == nil) then
+		source.outgoing = {}
 	end
-	table.insert(self.source.outgoing, self)
+	table.insert(source.outgoing, self)
 	return self
 end
 
 function Handler:check(event)
-	if (self.eventType == NullEvent) then
-		return event == NullEvent
+	local eventType = self.eventType
+	if (eventType == NullEvent) then
+		return event == NullEvent and self:doCheck(event)
 	else
-		return event.name == self.eventType.name and event.port == self.eventType.port
+		return event.name == eventType.name and event.port == self.port and self:doCheck(event)
 	end
+end
+
+function Handler:doCheck()
+	return true --by default, no more check. Can be overriden
 end
 
 function Handler:trigger(event)

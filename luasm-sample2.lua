@@ -4,18 +4,18 @@ require "luasm"
 print("Start " .. collectgarbage("count"));
 
 local A = luasm.AtomicState:new{name = "A"}
-function A:onEntry() --ThingML attributes/functions can be accessed via self.component
+function A:executeOnEntry() --ThingML attributes/functions can be accessed via self.component
 	print("A.onEntry")
 end
-function A:onExit()
+function A:executeOnExit()
 	print "A.onExit"
 end
 
 local B = luasm.AtomicState:new{name = "B"}
-function B:onEntry()
+function B:executeOnEntry()
 	print("B.onEntry")
 end
-function B:onExit()
+function B:executeOnExit()
 	print(B.name .. ".onExit")
 end
 
