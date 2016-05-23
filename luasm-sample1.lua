@@ -162,7 +162,7 @@ print("After start " .. collectgarbage("count"));
 
 
 local bench = coroutine.create(function()
-	for i = 1, 2 do
+	for i = 1, 1000 do
 		print(i .. " : " .. collectgarbage("count"));
 		print("========== " .. i .. " ==========")
 		print("e1")

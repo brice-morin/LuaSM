@@ -28,7 +28,7 @@ function Component:removeSession(session)
 		end
 		if (index ~= -1) then
 			session:kill()
-			table.remove(sessions, index)
+			table.remove(self.sessions, index)
 			session = nil
 		else
 			error("Cannot find session " .. session.name .. " within component " .. self.name)
@@ -41,7 +41,7 @@ end
 function Component:receive(port, event)
 	event.port = port
 	coroutine.resume(self.sched, event)
-	for i, session in ipairs(self.sessions) do
+	for _, session in ipairs(self.sessions) do
 		session:receive(port, event)
 	end
 	event = nil	
@@ -49,7 +49,7 @@ end
 
 function Component:send(port, event)
 	local callbacks = self.connectors[port]
-	for i, callback in pairs(callbacks) do
+	for _, callback in pairs(callbacks) do
 		callback(event)
 	end
 end
@@ -72,12 +72,12 @@ end
 function Component:start()
 	self.behavior:onEntry()  
 	repeat
-		local next, consumed = self.behavior:handle(NullEvent)  
+		local _, consumed = self.behavior:handle(NullEvent)  
 	until(not consumed)
 end
 
 function Component:stop()
-	for i, session in ipairs(self.sessions) do
+	for _, session in ipairs(self.sessions) do
 		session:stop()
 	end
 	self.on = false
@@ -86,7 +86,7 @@ function Component:stop()
 end
 
 function Component:kill()
-	for i, session in ipairs(self.sessions) do
+	for _, session in ipairs(self.sessions) do
 		session:kill()
 	end
 	if (self.on) then self:stop() end
@@ -135,7 +135,7 @@ function AtomicState:executeOnExit()
 end
 
 function AtomicState:handle(event)
-	for i, handler in ipairs(self.outgoing or {}) do
+	for _, handler in ipairs(self.outgoing or {}) do
 		if (handler:check(event)) then
 			return handler:trigger(event), true
 		end
@@ -157,15 +157,15 @@ end
 
 function CompositeState:init(component, region)
 	AtomicState:init(self, component, region)
-	for i, region in ipairs(self.regions) do
+	for _, region in ipairs(self.regions) do
 		region:init(component)
 	end
 end
 
 function CompositeState:handle(event)
 	local isHandled = false
-	for i, region in ipairs(self.regions) do
-		local consumed, terminated = region:handle(event) 
+	for _, region in ipairs(self.regions) do
+		local consumed = region:handle(event) 
 		if consumed then isHandled = true end
 	end
 	if not isHandled then --if nothing has consumed event, it is available to the composite
@@ -176,13 +176,13 @@ end
 
 function CompositeState:onEntry()
 	self:executeOnEntry()
-	for i, region in ipairs(self.regions) do
+	for _, region in ipairs(self.regions) do
 		region:onEntry()
 	end
 end
 
 function CompositeState:onExit()
-	for i, region in ipairs(self.regions) do
+	for _, region in ipairs(self.regions) do
 		region:onExit()
 	end
 	self:executeOnExit()
@@ -210,7 +210,7 @@ end
 
 function Region:init(component)
 	self.current = self.initial
-	for i, state in ipairs(self.states) do
+	for _, state in ipairs(self.states) do
 		state:init(component, self)
 	end
 	return self
